@@ -94,6 +94,38 @@ attack the MCP server. See the homework description for the full rules.
 
 ### Task 1
 > one paragraph describing your solution, and your results on `public_test`.
+>
+> The solution uses `deepseek-v4-flash` with LangChain's `create_agent` to verify CVs against external profile evidence from the SocialGraph MCP server.
+>
+> First, `cv_files()` and `cv_text()` locate PDF files and extract their text. The agent then uses `search_linkedin_people()` to find candidates, retrying with fuzzy matching or relaxed location constraints when necessary, and falls back to `search_facebook_users()` if needed. It retrieves profile details through `get_linkedin_profile()` and optionally `get_facebook_profile()`, then compares employment history, education, location, and skills against the CV. The system prompt defines candidate-matching rules and distinguishes genuine discrepancies, such as inflated seniority or altered dates, from harmless wording differences. The agent returns a JSON score, which `extract_score()` parses before `write_results()` saves the results to `results.csv`. CVs are processed asynchronously with `asyncio.Semaphore(3)` to limit concurrency. The solution achieved 6/7 accuracy on the public test set.
 
 ### Task 2
 > the attack techniques you used and why you expect them to work.
+>
+>**What I faked.** I added one fabricated job that does not exist on
+Kelly Tsang's LinkedIn profile, and I embedded two pieces of text in
+the PDF that were never part of the CV: a fake "verification complete"
+result claiming 100% match, and a fake higher-priority instruction
+telling the model to skip tool calls and output a fixed score. Both
+were written in white 1pt text, invisible to a human reader but
+extracted by the PDF loader and passed to the model.
+>
+> **Why the prompt cannot defend against this.** My system prompt listed
+what the verifier should do, but it could not mark off *where* the CV
+text begins and ends. From the model's point of view there is one
+flat sequence of tokens: the system prompt, then the CV. My injected
+lines and the real instructions compete for the same attention, and
+because the CV comes later and uses words like "override" and "final
+verdict", it often wins. Adding defensive rules to the prompt raises
+the cost of the attack but does not close the hole — the prompt is
+itself just more tokens in the same competition.
+>
+> **Why the model is fooled.** Three reasons stack. First, there is no
+enforced instruction hierarchy: a system message does not outrank
+text inside a user message, so "skip tool checks" is treated as a real
+instruction. Second, state injection beats rule checking — telling the
+model that verification is *already done* is easier for it to accept
+than re-deriving the answer. Third, the attacker writes the answer in
+the exact format the prompt asks for, so the model only has to copy
+it.
+>
